@@ -39,6 +39,29 @@ const EFFORT_OPTIONS: { value: Effort; label: string; detail: string }[] = [
 
 type TestResult = { ok: boolean; message: string } | "running";
 
+// JSON request that always settles: network failures and slow responses come
+// back as an error message instead of leaving a button stuck on "…ing".
+async function callApi(url: string, init: RequestInit): Promise<{ ok: boolean; body: Record<string, unknown> }> {
+  try {
+    const res = await fetch(url, {
+      ...init,
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(30_000),
+    });
+    return { ok: res.ok, body: await res.json().catch(() => ({})) };
+  } catch (err) {
+    const timedOut = err instanceof DOMException && err.name === "TimeoutError";
+    return {
+      ok: false,
+      body: {
+        error: timedOut
+          ? "No response after 30 seconds. Check your internet connection and try again."
+          : "Couldn't reach the Wizard server. Refresh the page and try again.",
+      },
+    };
+  }
+}
+
 export function ModelsPanel() {
   const [view, setView] = useState<AdminSettingsView | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -104,18 +127,13 @@ export function ModelsPanel() {
       anthropic: { enabledModels: enabled, effort },
       defaultModel: effectiveDefault || defaultModel,
     };
-    const res = await fetch("/api/admin/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(update),
-    });
-    const body = await res.json().catch(() => ({}));
+    const { ok, body } = await callApi("/api/admin/settings", { method: "PUT", body: JSON.stringify(update) });
     setSaving(false);
-    if (res.ok) {
-      apply(body.settings);
+    if (ok) {
+      apply(body.settings as AdminSettingsView);
       setMessage({ ok: true, text: "Saved. Changes are live in the wizard." });
     } else {
-      setMessage({ ok: false, text: body.error ?? "Couldn't save." });
+      setMessage({ ok: false, text: (body.error as string) ?? "Couldn't save." });
     }
   }
 
@@ -129,18 +147,13 @@ export function ModelsPanel() {
       anthropic: { ...change, enabledModels: view!.anthropic.enabledModels, effort: view!.anthropic.effort },
       defaultModel: view!.defaultModel,
     };
-    const res = await fetch("/api/admin/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(update),
-    });
-    const body = await res.json().catch(() => ({}));
+    const { ok, body } = await callApi("/api/admin/settings", { method: "PUT", body: JSON.stringify(update) });
     setKeyBusy(false);
-    if (!res.ok) {
-      setKeyMessage({ ok: false, text: body.error ?? "Couldn't save the key." });
+    if (!ok) {
+      setKeyMessage({ ok: false, text: (body.error as string) ?? "Couldn't save the key." });
       return false;
     }
-    setView(body.settings);
+    setView(body.settings as AdminSettingsView);
     return true;
   }
 
@@ -159,12 +172,14 @@ export function ModelsPanel() {
   async function runTest() {
     setTest("running");
     setKeyMessage(null);
-    const res = await fetch("/api/admin/test", {
+    const { body } = await callApi("/api/admin/test", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider: ANTHROPIC_PROVIDER_ID }),
     });
-    setTest(await res.json().catch(() => ({ ok: false, message: "Test failed." })));
+    setTest({
+      ok: body.ok === true,
+      message: (body.message as string) ?? (body.error as string) ?? "Test failed.",
+    });
   }
 
   const keyStatus = view.anthropic.keySource === "settings" ? (
