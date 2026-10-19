@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Windows / OneDrive
+desktop.ini
+
+# admin settings store (holds the encrypted API key)
+/data/
+
+# allow the example env file
+!.env.example
