@@ -35,7 +35,7 @@ export async function* generate(settings: Settings, req: GenerateRequest): Async
   }
 
   if (parsed.providerId === ANTHROPIC_PROVIDER_ID) {
-    yield* generateClaude(anthropicApiKey(settings)!, parsed.modelId, req);
+    yield* generateClaude(anthropicApiKey(settings)!, parsed.modelId, settings.anthropic.effort, req);
     return;
   }
   const provider = settings.customProviders.find((p) => p.id === parsed.providerId);
@@ -45,7 +45,12 @@ export async function* generate(settings: Settings, req: GenerateRequest): Async
 
 // ---------------------------------------------------------------- Claude
 
-async function* generateClaude(apiKey: string, model: string, req: GenerateRequest): AsyncGenerator<GenerateEvent> {
+async function* generateClaude(
+  apiKey: string,
+  model: string,
+  effort: Settings["anthropic"]["effort"],
+  req: GenerateRequest,
+): AsyncGenerator<GenerateEvent> {
   const client = new Anthropic({ apiKey });
 
   const fileBlocks: Anthropic.Beta.BetaContentBlockParam[] = [];
@@ -80,7 +85,7 @@ async function* generateClaude(apiKey: string, model: string, req: GenerateReque
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       thinking: { type: "adaptive" },
-      output_config: { effort: "medium" },
+      output_config: { effort },
       system: req.system,
       messages: [{ role: "user", content: [...fileBlocks, { type: "text", text }] }],
     },

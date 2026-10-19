@@ -1,17 +1,335 @@
 "use client";
 
-// Placeholder until the "AI models & keys" editor is built. The server-side
-// pieces it needs already exist: GET/PUT /api/admin/settings and
-// POST /api/admin/test. Until then, Claude uses the ANTHROPIC_API_KEY
-// environment variable with every Claude model enabled and Opus 5.5 as default.
+import { ANTHROPIC_PROVIDER_ID, makeModelRef, type ModelInfo } from "@/lib/models";
+import type { AdminSettingsUpdate, AdminSettingsView, Effort } from "@/lib/settings";
+import { useEffect, useState } from "react";
+import { PasswordInput } from "../PasswordInput";
+
+// AI settings: pick a provider, enter its API key, then configure it.
+// Only Claude is live today; the other entries show what's planned.
+
+interface ProviderOption {
+  id: string;
+  name: string;
+  available: boolean;
+  blurb: string;
+  keyHelp?: string;
+  keyPlaceholder?: string;
+}
+
+const PROVIDERS: ProviderOption[] = [
+  {
+    id: ANTHROPIC_PROVIDER_ID,
+    name: "Claude (Anthropic)",
+    available: true,
+    blurb: "Strong writing and reasoning, reads PDFs and images directly.",
+    keyHelp: "Create a key in the Claude Console: console.anthropic.com → Settings → API keys.",
+    keyPlaceholder: "sk-ant-…",
+  },
+  { id: "openai", name: "ChatGPT (OpenAI)", available: false, blurb: "" },
+  { id: "gemini", name: "Gemini (Google)", available: false, blurb: "" },
+  { id: "in-house", name: "Ankobia in-house AI", available: false, blurb: "" },
+];
+
+const EFFORT_OPTIONS: { value: Effort; label: string; detail: string }[] = [
+  { value: "low", label: "Quick", detail: "Fastest and cheapest. Fine for short, simple items." },
+  { value: "medium", label: "Balanced", detail: "Good quality at a reasonable speed. Recommended." },
+  { value: "high", label: "Thorough", detail: "Thinks longer for the best result. Slower and costs more." },
+];
+
+type TestResult = { ok: boolean; message: string } | "running";
+
 export function ModelsPanel() {
+  const [view, setView] = useState<AdminSettingsView | null>(null);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [provider, setProvider] = useState(ANTHROPIC_PROVIDER_ID);
+
+  const [newKey, setNewKey] = useState("");
+  const [removeKey, setRemoveKey] = useState(false);
+  const [enabled, setEnabled] = useState<string[]>([]);
+  const [defaultModel, setDefaultModel] = useState("");
+  const [effort, setEffort] = useState<Effort>("medium");
+
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+  const [test, setTest] = useState<TestResult | null>(null);
+
+  function apply(v: AdminSettingsView) {
+    setView(v);
+    setNewKey("");
+    setRemoveKey(false);
+    setEnabled(v.anthropic.enabledModels);
+    setDefaultModel(v.defaultModel);
+    setEffort(v.anthropic.effort);
+    setDirty(false);
+  }
+
+  useEffect(() => {
+    fetch("/api/admin/settings")
+      .then((r) => r.json())
+      .then((body: { settings: AdminSettingsView; claudeModels: ModelInfo[] }) => {
+        setModels(body.claudeModels);
+        apply(body.settings);
+      });
+  }, []);
+
+  if (!view) return <p className="text-muted">Loading…</p>;
+
+  const selected = PROVIDERS.find((p) => p.id === provider)!;
+  const edit = () => {
+    setDirty(true);
+    setMessage(null);
+    setTest(null);
+  };
+  const refFor = (modelId: string) => makeModelRef(ANTHROPIC_PROVIDER_ID, modelId);
+  const enabledModels = models.filter((m) => enabled.includes(m.id));
+  const willHaveKey = Boolean(newKey.trim()) || (view.anthropic.hasApiKey && !removeKey);
+  const effectiveDefault = enabledModels.some((m) => refFor(m.id) === defaultModel)
+    ? defaultModel
+    : enabledModels[0]
+      ? refFor(enabledModels[0].id)
+      : "";
+
+  function toggleModel(id: string) {
+    setEnabled(enabled.includes(id) ? enabled.filter((m) => m !== id) : [...enabled, id]);
+    edit();
+  }
+
+  async function save() {
+    if (willHaveKey && enabledModels.length === 0) {
+      setMessage({ ok: false, text: "Turn on at least one model." });
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    const update: AdminSettingsUpdate = {
+      anthropic: {
+        apiKey: newKey.trim() || undefined,
+        clearApiKey: removeKey,
+        enabledModels: enabled,
+        effort,
+      },
+      defaultModel: effectiveDefault || defaultModel,
+    };
+    const res = await fetch("/api/admin/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(update),
+    });
+    const body = await res.json().catch(() => ({}));
+    setSaving(false);
+    if (res.ok) {
+      apply(body.settings);
+      setMessage({ ok: true, text: "Saved. Changes are live in the wizard." });
+    } else {
+      setMessage({ ok: false, text: body.error ?? "Couldn't save." });
+    }
+  }
+
+  async function runTest() {
+    setTest("running");
+    const res = await fetch("/api/admin/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: ANTHROPIC_PROVIDER_ID }),
+    });
+    setTest(await res.json().catch(() => ({ ok: false, message: "Test failed." })));
+  }
+
+  const keyStatus = removeKey ? (
+    <span className="text-red-700">The saved key will be removed when you save.</span>
+  ) : view.anthropic.keySource === "settings" ? (
+    <span>
+      Key saved: <code className="rounded bg-canvas px-1.5 py-0.5">{view.anthropic.apiKeyHint}</code>
+    </span>
+  ) : view.anthropic.keySource === "env" ? (
+    <span className="text-muted">Using the key from the server&apos;s .env.local file. Enter one here to override it.</span>
+  ) : (
+    <span className="text-amber-800">No key yet. The wizard can&apos;t generate anything until one is added.</span>
+  );
+
   return (
-    <section className="card space-y-2">
-      <h2 className="text-lg font-bold text-navy">AI models &amp; keys</h2>
-      <p className="text-sm text-muted">
-        This screen is coming soon. For now, Claude is configured with the <code>ANTHROPIC_API_KEY</code> server setting, every
-        Claude model is available, and Claude Opus 5.5 is the default.
-      </p>
-    </section>
+    <div className="space-y-6">
+      {/* Step 1: provider */}
+      <section className="card space-y-3">
+        <StepHeading n={1} title="Choose an AI" />
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,320px)_1fr] sm:items-start">
+          <div>
+            <label className="label" htmlFor="provider">
+              AI provider
+            </label>
+            <select id="provider" className="input" value={provider} onChange={(e) => setProvider(e.target.value)}>
+              {PROVIDERS.map((p) => (
+                <option key={p.id} value={p.id} disabled={!p.available}>
+                  {p.name}
+                  {p.available ? "" : " (coming soon)"}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="rounded-xl bg-canvas px-4 py-3 text-sm sm:mt-6">
+            <p className="text-ink">{selected.blurb}</p>
+            <p className="mt-1 text-muted">More AI options, including ChatGPT, Gemini and our own in-house AI, are planned.</p>
+          </div>
+        </div>
+      </section>
+
+      {/* Step 2: API key */}
+      <section className="card space-y-3">
+        <StepHeading n={2} title={`${selected.name} API key`} />
+        <p className="text-sm">{keyStatus}</p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+          <div className="sm:w-96">
+            <label className="sr-only" htmlFor="api-key">
+              API key
+            </label>
+            <PasswordInput
+              id="api-key"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={view.anthropic.keySource === "settings" ? "Paste a new key to replace it" : selected.keyPlaceholder}
+              value={newKey}
+              onChange={(e) => {
+                setNewKey(e.target.value);
+                setRemoveKey(false);
+                edit();
+              }}
+            />
+          </div>
+          <button type="button" className="btn" onClick={runTest} disabled={dirty || !view.anthropic.hasApiKey || test === "running"}>
+            {test === "running" ? "Testing…" : "Test connection"}
+          </button>
+          {view.anthropic.keySource === "settings" && !removeKey && (
+            <button
+              type="button"
+              className="btn-danger"
+              onClick={() => {
+                setRemoveKey(true);
+                setNewKey("");
+                edit();
+              }}
+            >
+              Remove key
+            </button>
+          )}
+        </div>
+        <p className="help">
+          {selected.keyHelp} Keys are encrypted on the server and never shown again.
+          {dirty && " Save before testing."}
+        </p>
+        {test && test !== "running" && (
+          <p className={`rounded-lg px-3 py-2 text-sm ${test.ok ? "bg-mint/25 text-navy" : "bg-red-50 text-red-800"}`}>
+            {test.ok ? "✓ " : "✕ "}
+            {test.message}
+          </p>
+        )}
+      </section>
+
+      {/* Step 3: configuration */}
+      <section className="card space-y-6">
+        <StepHeading n={3} title="Configuration" />
+
+        <fieldset>
+          <legend className="label">Models people can choose</legend>
+          <p className="mb-3 text-sm text-muted">If you turn on more than one, people see an &quot;AI model&quot; picker in the wizard.</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {models.map((m) => (
+              <label
+                key={m.id}
+                className={`flex cursor-pointer gap-3 rounded-xl border p-3 transition ${
+                  enabled.includes(m.id) ? "border-teal bg-mint/15" : "border-line hover:bg-canvas"
+                }`}
+              >
+                <input type="checkbox" className="mt-1 accent-teal" checked={enabled.includes(m.id)} onChange={() => toggleModel(m.id)} />
+                <span>
+                  <span className="block text-sm font-semibold text-navy">{m.label}</span>
+                  <span className="block text-xs text-muted">{m.description}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
+        <div className="sm:w-80">
+          <label className="label" htmlFor="default-model">
+            Default model
+          </label>
+          <select
+            id="default-model"
+            className="input"
+            value={effectiveDefault}
+            disabled={enabledModels.length === 0}
+            onChange={(e) => {
+              setDefaultModel(e.target.value);
+              edit();
+            }}
+          >
+            {enabledModels.length === 0 && <option value="">Turn on a model first</option>}
+            {enabledModels.map((m) => (
+              <option key={m.id} value={refFor(m.id)}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+          <p className="help">Pre-selected for everyone.</p>
+        </div>
+
+        <fieldset>
+          <legend className="label">Response depth</legend>
+          <p className="mb-3 text-sm text-muted">How long the AI thinks before writing. Applies to every request.</p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {EFFORT_OPTIONS.map((o) => (
+              <label
+                key={o.value}
+                className={`flex cursor-pointer gap-3 rounded-xl border p-3 transition ${
+                  effort === o.value ? "border-teal bg-mint/15" : "border-line hover:bg-canvas"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="effort"
+                  className="mt-1 accent-teal"
+                  checked={effort === o.value}
+                  onChange={() => {
+                    setEffort(o.value);
+                    edit();
+                  }}
+                />
+                <span>
+                  <span className="block text-sm font-semibold text-navy">{o.label}</span>
+                  <span className="block text-xs text-muted">{o.detail}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      </section>
+
+      <div
+        className={`flex flex-wrap items-center justify-end gap-3 rounded-2xl border border-line bg-white/95 px-5 py-3 backdrop-blur ${
+          dirty ? "sticky bottom-4 shadow-md" : ""
+        }`}
+      >
+        {message && <span className={`text-sm ${message.ok ? "text-teal" : "text-red-700"}`}>{message.text}</span>}
+        {dirty && (
+          <button type="button" className="btn" onClick={() => apply(view)} disabled={saving}>
+            Discard changes
+          </button>
+        )}
+        <button type="button" className="btn-primary" onClick={save} disabled={!dirty || saving}>
+          {saving ? "Saving…" : dirty ? "Save settings" : "Saved"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function StepHeading({ n, title }: { n: number; title: string }) {
+  return (
+    <h2 className="flex items-center gap-3 text-lg font-bold text-navy">
+      <span className="flex h-7 w-7 items-center justify-center rounded-full bg-teal text-sm text-white">{n}</span>
+      {title}
+    </h2>
   );
 }

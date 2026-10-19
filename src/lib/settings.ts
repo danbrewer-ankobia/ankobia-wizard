@@ -25,11 +25,15 @@ export interface CustomProvider {
   models: string[];
 }
 
+export const EFFORT_LEVELS = ["low", "medium", "high"] as const;
+export type Effort = (typeof EFFORT_LEVELS)[number];
+
 export interface Settings {
   anthropic: {
     apiKeyEnc?: string;
     apiKeyHint?: string;
     enabledModels: string[];
+    effort: Effort;
   };
   customProviders: CustomProvider[];
   defaultModel: string;
@@ -38,15 +42,22 @@ export interface Settings {
 
 // Shape exchanged with the admin page.
 export interface AdminSettingsView {
-  anthropic: { hasApiKey: boolean; apiKeyHint?: string; keySource: "settings" | "env" | "none"; enabledModels: string[] };
+  anthropic: {
+    hasApiKey: boolean;
+    apiKeyHint?: string;
+    keySource: "settings" | "env" | "none";
+    enabledModels: string[];
+    effort: Effort;
+  };
   customProviders: Array<Omit<CustomProvider, "apiKeyEnc"> & { hasApiKey: boolean }>;
   defaultModel: string;
   updatedAt?: string;
 }
 
 export interface AdminSettingsUpdate {
-  anthropic: { apiKey?: string; clearApiKey?: boolean; enabledModels: string[] };
-  customProviders: Array<{
+  anthropic: { apiKey?: string; clearApiKey?: boolean; enabledModels: string[]; effort?: Effort };
+  /** Omit to keep the saved in-house providers unchanged. */
+  customProviders?: Array<{
     id?: string;
     name: string;
     baseUrl: string;
@@ -60,7 +71,7 @@ export interface AdminSettingsUpdate {
 const SETTINGS_FILE = "settings.json";
 
 const DEFAULT_SETTINGS: Settings = {
-  anthropic: { enabledModels: CLAUDE_MODELS.map((m) => m.id) },
+  anthropic: { enabledModels: CLAUDE_MODELS.map((m) => m.id), effort: "medium" },
   customProviders: [],
   defaultModel: DEFAULT_MODEL_REF,
 };
@@ -149,6 +160,7 @@ export function toAdminView(settings: Settings): AdminSettingsView {
       apiKeyHint: settings.anthropic.apiKeyHint,
       keySource: settings.anthropic.apiKeyEnc ? "settings" : process.env.ANTHROPIC_API_KEY ? "env" : "none",
       enabledModels: settings.anthropic.enabledModels,
+      effort: settings.anthropic.effort,
     },
     customProviders: settings.customProviders.map(({ apiKeyEnc, ...rest }) => ({ ...rest, hasApiKey: Boolean(apiKeyEnc) })),
     defaultModel: settings.defaultModel,
@@ -164,7 +176,9 @@ export async function updateSettings(update: AdminSettingsUpdate): Promise<Setti
   const current = await loadSettings();
 
   const enabledClaude = update.anthropic.enabledModels.filter(isClaudeModel);
-  const anthropic: Settings["anthropic"] = { enabledModels: enabledClaude };
+  const effort = update.anthropic.effort ?? current.anthropic.effort;
+  if (!EFFORT_LEVELS.includes(effort)) throw new SettingsValidationError("Invalid response depth.");
+  const anthropic: Settings["anthropic"] = { enabledModels: enabledClaude, effort };
   const newKey = update.anthropic.apiKey?.trim();
   if (newKey) {
     anthropic.apiKeyEnc = encrypt(newKey);
@@ -174,7 +188,9 @@ export async function updateSettings(update: AdminSettingsUpdate): Promise<Setti
     anthropic.apiKeyHint = current.anthropic.apiKeyHint;
   }
 
-  const customProviders: CustomProvider[] = update.customProviders.map((p) => {
+  const customProviders: CustomProvider[] = !update.customProviders
+    ? current.customProviders
+    : update.customProviders.map((p) => {
     const name = p.name.trim();
     const baseUrl = p.baseUrl.trim().replace(/\/+$/, "");
     if (!name) throw new SettingsValidationError("Each custom provider needs a name.");

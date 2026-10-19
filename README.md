@@ -10,7 +10,8 @@ An internal web app that helps people new to AI make polished work documents. Us
 - **See the prompt**: shows exactly what is sent, so users learn prompting as they go.
 - **Admin (/admin)**:
   - Prompt library editor: add, edit, reorder, and delete items, their questions and templates, plus the shared "house rules" system prompt. Reset to defaults any time.
-  - AI providers: Claude via the Anthropic API, plus in-house models through any OpenAI-compatible `/chat/completions` endpoint. Allowed models, default model, and encrypted API keys. *(The editor screen for this tab is still to be built; the server API exists at `/api/admin/settings`.)*
+  - AI settings: choose an AI provider (Claude today; ChatGPT, Gemini and an in-house AI are listed as coming soon), enter its API key (encrypted on the server, test connection), then configure which models people can pick, the default model, and response depth (Quick / Balanced / Thorough).
+  - The server also supports in-house models through any OpenAI-compatible `/chat/completions` endpoint; the screen for adding them comes with the "in-house AI" option.
 
 ## Run locally
 
