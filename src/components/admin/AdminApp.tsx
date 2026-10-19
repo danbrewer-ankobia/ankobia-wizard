@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PasswordInput } from "../PasswordInput";
 import { LibraryPanel } from "./LibraryPanel";
 import { ModelsPanel } from "./ModelsPanel";
 
@@ -104,10 +105,8 @@ function Login({ onDone }: { onDone: () => void }) {
           <label className="label" htmlFor="pw">
             Password
           </label>
-          <input
+          <PasswordInput
             id="pw"
-            type="password"
-            className="input"
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

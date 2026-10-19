@@ -44,6 +44,12 @@ body {
   }
 }
 
+/* PasswordInput has its own eye toggle; hide Edge's built-in one */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+
 /* Twinkling decorative stars */
 @keyframes twinkle {
   0%,
