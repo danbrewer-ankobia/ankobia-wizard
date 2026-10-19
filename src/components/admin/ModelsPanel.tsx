@@ -45,7 +45,8 @@ export function ModelsPanel() {
   const [provider, setProvider] = useState(ANTHROPIC_PROVIDER_ID);
 
   const [newKey, setNewKey] = useState("");
-  const [removeKey, setRemoveKey] = useState(false);
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [keyMessage, setKeyMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [enabled, setEnabled] = useState<string[]>([]);
   const [defaultModel, setDefaultModel] = useState("");
   const [effort, setEffort] = useState<Effort>("medium");
@@ -57,8 +58,6 @@ export function ModelsPanel() {
 
   function apply(v: AdminSettingsView) {
     setView(v);
-    setNewKey("");
-    setRemoveKey(false);
     setEnabled(v.anthropic.enabledModels);
     setDefaultModel(v.defaultModel);
     setEffort(v.anthropic.effort);
@@ -80,11 +79,9 @@ export function ModelsPanel() {
   const edit = () => {
     setDirty(true);
     setMessage(null);
-    setTest(null);
   };
   const refFor = (modelId: string) => makeModelRef(ANTHROPIC_PROVIDER_ID, modelId);
   const enabledModels = models.filter((m) => enabled.includes(m.id));
-  const willHaveKey = Boolean(newKey.trim()) || (view.anthropic.hasApiKey && !removeKey);
   const effectiveDefault = enabledModels.some((m) => refFor(m.id) === defaultModel)
     ? defaultModel
     : enabledModels[0]
@@ -97,19 +94,14 @@ export function ModelsPanel() {
   }
 
   async function save() {
-    if (willHaveKey && enabledModels.length === 0) {
+    if (view!.anthropic.hasApiKey && enabledModels.length === 0) {
       setMessage({ ok: false, text: "Turn on at least one model." });
       return;
     }
     setSaving(true);
     setMessage(null);
     const update: AdminSettingsUpdate = {
-      anthropic: {
-        apiKey: newKey.trim() || undefined,
-        clearApiKey: removeKey,
-        enabledModels: enabled,
-        effort,
-      },
+      anthropic: { enabledModels: enabled, effort },
       defaultModel: effectiveDefault || defaultModel,
     };
     const res = await fetch("/api/admin/settings", {
@@ -127,8 +119,46 @@ export function ModelsPanel() {
     }
   }
 
+  // Saves or removes only the key; the configuration below keeps its own
+  // unsaved edits and is saved with the bar at the bottom.
+  async function putKey(change: { apiKey?: string; clearApiKey?: boolean }): Promise<boolean> {
+    setKeyBusy(true);
+    setKeyMessage(null);
+    setTest(null);
+    const update: AdminSettingsUpdate = {
+      anthropic: { ...change, enabledModels: view!.anthropic.enabledModels, effort: view!.anthropic.effort },
+      defaultModel: view!.defaultModel,
+    };
+    const res = await fetch("/api/admin/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(update),
+    });
+    const body = await res.json().catch(() => ({}));
+    setKeyBusy(false);
+    if (!res.ok) {
+      setKeyMessage({ ok: false, text: body.error ?? "Couldn't save the key." });
+      return false;
+    }
+    setView(body.settings);
+    return true;
+  }
+
+  async function saveKey() {
+    if (await putKey({ apiKey: newKey.trim() })) {
+      setNewKey("");
+      setKeyMessage({ ok: true, text: "Key saved. Now test the connection." });
+    }
+  }
+
+  async function removeSavedKey() {
+    if (!confirm("Remove the saved Claude API key? The wizard stops working until a new key is added.")) return;
+    if (await putKey({ clearApiKey: true })) setKeyMessage({ ok: true, text: "Key removed." });
+  }
+
   async function runTest() {
     setTest("running");
+    setKeyMessage(null);
     const res = await fetch("/api/admin/test", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -137,9 +167,7 @@ export function ModelsPanel() {
     setTest(await res.json().catch(() => ({ ok: false, message: "Test failed." })));
   }
 
-  const keyStatus = removeKey ? (
-    <span className="text-red-700">The saved key will be removed when you save.</span>
-  ) : view.anthropic.keySource === "settings" ? (
+  const keyStatus = view.anthropic.keySource === "settings" ? (
     <span>
       Key saved: <code className="rounded bg-canvas px-1.5 py-0.5">{view.anthropic.apiKeyHint}</code>
     </span>
@@ -192,32 +220,38 @@ export function ModelsPanel() {
               value={newKey}
               onChange={(e) => {
                 setNewKey(e.target.value);
-                setRemoveKey(false);
-                edit();
+                setKeyMessage(null);
+                setTest(null);
               }}
+              onKeyDown={(e) => e.key === "Enter" && newKey.trim() && !keyBusy && saveKey()}
             />
           </div>
-          <button type="button" className="btn" onClick={runTest} disabled={dirty || !view.anthropic.hasApiKey || test === "running"}>
+          <button type="button" className="btn-primary py-2" onClick={saveKey} disabled={!newKey.trim() || keyBusy}>
+            {keyBusy ? "Saving…" : "Save key"}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={runTest}
+            disabled={!view.anthropic.hasApiKey || Boolean(newKey.trim()) || keyBusy || test === "running"}
+          >
             {test === "running" ? "Testing…" : "Test connection"}
           </button>
-          {view.anthropic.keySource === "settings" && !removeKey && (
-            <button
-              type="button"
-              className="btn-danger"
-              onClick={() => {
-                setRemoveKey(true);
-                setNewKey("");
-                edit();
-              }}
-            >
+          {view.anthropic.keySource === "settings" && (
+            <button type="button" className="btn-danger" onClick={removeSavedKey} disabled={keyBusy}>
               Remove key
             </button>
           )}
         </div>
         <p className="help">
-          {selected.keyHelp} Keys are encrypted on the server and never shown again.
-          {dirty && " Save before testing."}
+          {selected.keyHelp} Save the key, then test the connection. Saved keys are encrypted on the server and never shown
+          again.
         </p>
+        {keyMessage && (
+          <p className={`rounded-lg px-3 py-2 text-sm ${keyMessage.ok ? "bg-mint/25 text-navy" : "bg-red-50 text-red-800"}`}>
+            {keyMessage.text}
+          </p>
+        )}
         {test && test !== "running" && (
           <p className={`rounded-lg px-3 py-2 text-sm ${test.ok ? "bg-mint/25 text-navy" : "bg-red-50 text-red-800"}`}>
             {test.ok ? "✓ " : "✕ "}
