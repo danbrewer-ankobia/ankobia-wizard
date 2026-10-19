@@ -22,7 +22,7 @@ cp .env.example .env.local   # then set ADMIN_PASSWORD, ADMIN_SECRET, ANTHROPIC_
 pnpm dev
 ```
 
-Open http://localhost:3000 for the wizard and http://localhost:3000/admin for settings.
+Open http://localhost:3100 for the wizard and http://localhost:3100/admin for settings.
 
 ## Project layout
 

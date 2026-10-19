@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "predev": "node scripts/clean-desktop-ini.mjs",
+    "dev": "next dev -p 3100",
+    "prebuild": "node scripts/clean-desktop-ini.mjs",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -p 3100",
     "lint": "eslint"
   },
   "dependencies": {
