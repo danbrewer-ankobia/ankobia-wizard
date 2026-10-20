@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
+    "geist": "^1.8.1",
     "jszip": "^3.10.2",
     "mammoth": "^1.13.0",
     "next": "16.4.2",

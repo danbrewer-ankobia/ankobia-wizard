@@ -1,0 +1,4 @@
+# Keep script line endings correct for their platform, whatever the checkout settings.
+*.sh  text eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
